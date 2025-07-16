@@ -1,6 +1,7 @@
 import argparse
 import time
 import numpy as np
+import os
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import StratifiedShuffleSplit
@@ -92,7 +93,42 @@ def test_classifier(model_name, X_train, X_test, y_train, y_test, label_encoder)
         "Weighted Precision": round(weighted["precision"], 4),
         "Weighted Recall": round(weighted["recall"], 4),
         "Weighted F1": round(weighted["f1-score"], 4),
+    }, clf
+    
+def export_model_bundle(model, le, input_file, model_name, model_save_dir="models"):
+    os.makedirs(model_save_dir, exist_ok=True)
+    from joblib import dump
+    from datetime import datetime
+    import json
+
+    base_name = f"{model_name.lower()}_{os.path.splitext(os.path.basename(input_file))[0]}"
+    model_path = os.path.join(model_save_dir, f"{base_name}.joblib")
+    le_path = os.path.join(model_save_dir, f"le_{os.path.splitext(os.path.basename(input_file))[0]}.joblib")
+    config_path = os.path.join(model_save_dir, f"{base_name}.json")
+
+    # Guardar modelo y codificador
+    dump(model, model_path)
+    dump(le, le_path)
+
+    # Configuración del modelo
+    config = {
+        "model_name": model_name.lower(),
+        "input_file": os.path.basename(input_file),
+        "num_classes": len(le.classes_),
+        "class_labels": le.classes_.tolist(),
+        "created_at": datetime.now().isoformat(),
+        "model_file": os.path.basename(model_path),
+        "label_encoder_file": os.path.basename(le_path),
+        "framework": "thundersvm" if "thundersvm" in str(type(model)).lower() else "scikit-learn"
     }
+
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=4)
+
+    print(f"💾 Model saved in: {model_path}")
+    print(f"💾 LabelEncoder saved in: {le_path}")
+    print(f"📝 Config saved in: {config_path}")
+
 
 # -------------------------------
 # Main entry point
@@ -107,6 +143,7 @@ def main():
                         help="List of models to train (e.g., knn svm). Use 'all' to run all supported models.")
     parser.add_argument("--train_fraction", type=float, default=1.0,
                     help="Fraction of the dataset to use for training (0.1 to 1.0)")
+    parser.add_argument("--export", action="store_true", help="If enabled, export the trained model to /models.")
 
     args = parser.parse_args()
 
@@ -146,8 +183,17 @@ def main():
 
     summary = []
     for model in models_to_run:
-        result = test_classifier(model, X_train, X_test, y_train, y_test, label_encoder)  # 💡 CAMBIO
+        result, clf = test_classifier(model, X_train, X_test, y_train, y_test, label_encoder)
         summary.append(result)
+
+        if args.export:
+            export_model_bundle(
+                model=clf,
+                le=label_encoder,
+                input_file=input_file,
+                model_name=model
+            )
+
 
     # Show summary table
     print("\nSummary:")
