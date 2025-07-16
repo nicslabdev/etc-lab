@@ -95,39 +95,55 @@ def test_classifier(model_name, X_train, X_test, y_train, y_test, label_encoder)
         "Weighted F1": round(weighted["f1-score"], 4),
     }, clf
     
-def export_model_bundle(model, le, input_file, model_name, model_save_dir="models"):
-    os.makedirs(model_save_dir, exist_ok=True)
+def export_model_bundle(model, le, scaler, input_file, model_name, model_save_dir="models"):
     from joblib import dump
-    from datetime import datetime
+    import os
     import json
+    from datetime import datetime
 
+    os.makedirs(model_save_dir, exist_ok=True)
+
+    # Nombre base
     base_name = f"{model_name.lower()}_{os.path.splitext(os.path.basename(input_file))[0]}"
-    model_path = os.path.join(model_save_dir, f"{base_name}.joblib")
-    le_path = os.path.join(model_save_dir, f"le_{os.path.splitext(os.path.basename(input_file))[0]}.joblib")
-    config_path = os.path.join(model_save_dir, f"{base_name}.json")
+    
+    # Nombres de archivos
+    model_filename = f"{base_name}.joblib"
+    le_filename = f"le_{os.path.splitext(os.path.basename(input_file))[0]}.joblib"
+    scaler_filename = f"scaler_{os.path.splitext(os.path.basename(input_file))[0]}.joblib"
+    config_filename = f"{base_name}.json"
 
-    # Guardar modelo y codificador
+    # Rutas completas
+    model_path = os.path.join(model_save_dir, model_filename)
+    le_path = os.path.join(model_save_dir, le_filename)
+    scaler_path = os.path.join(model_save_dir, scaler_filename)
+    config_path = os.path.join(model_save_dir, config_filename)
+
+    # Guardar modelo, LabelEncoder y Scaler
     dump(model, model_path)
     dump(le, le_path)
+    dump(scaler, scaler_path)
 
-    # Configuración del modelo
+    print(f"💾 Modelo guardado en: {model_path}")
+    print(f"💾 LabelEncoder guardado en: {le_path}")
+    print(f"💾 Scaler guardado en: {scaler_path}")
+
+    # Guardar configuración
     config = {
         "model_name": model_name.lower(),
         "input_file": os.path.basename(input_file),
+        "framework": "scikit-learn",
         "num_classes": len(le.classes_),
         "class_labels": le.classes_.tolist(),
-        "created_at": datetime.now().isoformat(),
         "model_file": os.path.basename(model_path),
         "label_encoder_file": os.path.basename(le_path),
-        "framework": "thundersvm" if "thundersvm" in str(type(model)).lower() else "scikit-learn"
+        "scaler_file": os.path.basename(scaler_path),
+        "created_at": datetime.now().isoformat()
     }
 
     with open(config_path, "w") as f:
         json.dump(config, f, indent=4)
 
-    print(f"💾 Model saved in: {model_path}")
-    print(f"💾 LabelEncoder saved in: {le_path}")
-    print(f"📝 Config saved in: {config_path}")
+    print(f"📝 Configuración guardada en: {config_path}")
 
 
 # -------------------------------
@@ -190,9 +206,39 @@ def main():
             export_model_bundle(
                 model=clf,
                 le=label_encoder,
+                scaler=scaler,
                 input_file=input_file,
                 model_name=model
             )
+
+    if args.export:
+        from joblib import dump
+        import os
+        import json
+        from datetime import datetime
+
+        os.makedirs("models", exist_ok=True)
+        base_name = f"{model.lower()}_{os.path.splitext(os.path.basename(input_file))[0]}"
+        scaler_file = f"scaler_{os.path.splitext(os.path.basename(input_file))[0]}.joblib"
+        dump(scaler, os.path.join("models", scaler_file))
+        
+        config = {
+            "model_name": model.lower(),
+            "input_file": os.path.basename(input_file),
+            "framework": "scikit-learn" if not THUNDERSVM_OK else "thundersvm",
+            "input_dim": X.shape[1],
+            "num_classes": len(label_encoder.classes_),
+            "class_labels": label_encoder.classes_.tolist(),
+            "model_file": f"{base_name}.joblib",
+            "label_encoder_file": f"le_{os.path.splitext(os.path.basename(input_file))[0]}.joblib",
+            "scaler_file": scaler_file,
+            "created_at": datetime.now().isoformat()
+        }
+
+        with open(os.path.join("models", f"{base_name}.json"), "w") as f:
+            json.dump(config, f, indent=4)
+
+        print(f"🔧 Scaler saved in: models/{scaler_file}")
 
 
     # Show summary table

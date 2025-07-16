@@ -2,6 +2,7 @@ import argparse
 import torch
 import numpy as np
 import json
+import os
 from joblib import load
 from collections import Counter
 from sklearn.preprocessing import MinMaxScaler
@@ -65,6 +66,14 @@ def main():
     model_path = f"{args.weights_dir}/{model_file}"
     le_path = f"{args.weights_dir}/{le_file}"
     le = load(le_path)
+    
+    # Cargar scaler
+    scaler_file = config.get("scaler_file")
+    if not scaler_file:
+        raise ValueError("El archivo de configuración no contiene 'scaler_file'.")
+    scaler_path = os.path.join(args.weights_dir, scaler_file)
+    scaler = load(scaler_path)
+
 
     if framework == "pytorch":
         model = load_model(model_name, input_dim, num_classes, model_path)
@@ -92,8 +101,6 @@ def main():
             raise ValueError(f"Dimensión de entrada no coincide con el modelo: {X_full.shape[1]} ≠ {input_dim}")
 
     # 4. Normalizar todo el conjunto completo
-    scaler = MinMaxScaler().fit(X_full)
-
     # Seleccionar paquete (si se indicó) y aplicar el mismo escalado
     if args.packet_index is not None:
         if args.packet_index < 0 or args.packet_index >= len(X_full):
@@ -108,7 +115,6 @@ def main():
 
     # 5. Predecir
     if framework == "pytorch":
-        X_tensor = torch.tensor(X, dtype=torch.float32)
         with torch.no_grad():
             outputs = model(X_tensor)
             probs = F.softmax(outputs, dim=1).numpy()
