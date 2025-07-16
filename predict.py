@@ -32,6 +32,8 @@ def main():
     parser.add_argument("--features", type=str, required=True, help="Archivo .npz con clave 'X'")
     parser.add_argument("--config", type=str, required=True, help="Archivo .json de configuración del modelo")
     parser.add_argument("--weights_dir", type=str, default="models", help="Carpeta donde están .pt y .joblib")
+    parser.add_argument("--packet-index", type=int, default=None,
+                    help="Índice de paquete a clasificar (si se desea uno solo)")
 
     args = parser.parse_args()
 
@@ -81,16 +83,27 @@ def main():
     if "X" not in data:
         raise ValueError(f"El archivo {args.features} no contiene la clave 'X'")
 
-    X = data["X"]
+    X_full = data["X"]
 
     if framework == "pytorch":
         if input_dim is None:
             raise ValueError("Falta 'input_dim' en el config para modelos de PyTorch.")
-        if X.shape[1] != input_dim:
-            raise ValueError(f"Dimensión de entrada no coincide con el modelo: {X.shape[1]} ≠ {input_dim}")
+        if X_full.shape[1] != input_dim:
+            raise ValueError(f"Dimensión de entrada no coincide con el modelo: {X_full.shape[1]} ≠ {input_dim}")
 
-    # 4. Normalizar como en entrenamiento
-    X = MinMaxScaler().fit_transform(X)
+    # 4. Normalizar todo el conjunto completo
+    scaler = MinMaxScaler().fit(X_full)
+
+    # Seleccionar paquete (si se indicó) y aplicar el mismo escalado
+    if args.packet_index is not None:
+        if args.packet_index < 0 or args.packet_index >= len(X_full):
+            raise ValueError(f"Índice fuera de rango: {args.packet_index}")
+        X = X_full[args.packet_index:args.packet_index+1]
+    else:
+        X = X_full
+
+    X = scaler.transform(X)
+
     X_tensor = torch.tensor(X, dtype=torch.float32)
 
     # 5. Predecir
@@ -112,9 +125,11 @@ def main():
     if len(X) == 1:
         print("🔍 Predicción para paquete único:")
         print(f"Clase probable: {labels[0]}")
-        print("Distribución:")
-        for i, p in enumerate(probs[0]):
-            print(f"- {class_labels[i]}: {p:.2f}")
+        if probs is not None:
+            print("Distribución:")
+            for i, p in enumerate(probs[0]):
+                print(f"- {class_labels[i]}: {p:.2f}")
+
     else:
         print("🔍 Predicciones por paquete:")
         for i, label in enumerate(labels):
