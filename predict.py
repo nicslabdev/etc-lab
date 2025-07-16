@@ -42,24 +42,35 @@ def main():
     except Exception as e:
         raise ValueError(f"Error al leer el archivo JSON de configuración: {e}")
 
-    required_keys = ["model_name", "input_dim", "num_classes", "class_labels", "model_file", "label_encoder_file"]
+    required_keys = ["model_name", "num_classes", "class_labels", "model_file", "label_encoder_file"]
+    if config.get("framework", "pytorch") == "pytorch":
+        required_keys.append("input_dim")
+
     for key in required_keys:
         if key not in config:
             raise ValueError(f"Falta la clave '{key}' en el archivo de configuración.")
 
     model_name = config["model_name"]
-    input_dim = config["input_dim"]
+    input_dim = config.get("input_dim")  # puede ser None si es un modelo ML
     num_classes = config["num_classes"]
     class_labels = config["class_labels"]
     model_file = config["model_file"]
     le_file = config["label_encoder_file"]
 
+    framework = config.get("framework", "pytorch")  # por compatibilidad con versiones antiguas
+
     # 2. Cargar modelo y encoder
     model_path = f"{args.weights_dir}/{model_file}"
     le_path = f"{args.weights_dir}/{le_file}"
-
-    model = load_model(model_name, input_dim, num_classes, model_path)
     le = load(le_path)
+
+    if framework == "pytorch":
+        model = load_model(model_name, input_dim, num_classes, model_path)
+    elif framework in ["scikit-learn", "thundersvm"]:
+        model = load(model_path)
+    else:
+        raise ValueError(f"Framework desconocido en el config: {framework}")
+
 
     # 3. Cargar features
     try:
@@ -72,19 +83,29 @@ def main():
 
     X = data["X"]
 
-    if X.shape[1] != input_dim:
-        raise ValueError(f"Dimensión de entrada no coincide con el modelo: {X.shape[1]} ≠ {input_dim}")
+    if framework == "pytorch":
+        if input_dim is None:
+            raise ValueError("Falta 'input_dim' en el config para modelos de PyTorch.")
+        if X.shape[1] != input_dim:
+            raise ValueError(f"Dimensión de entrada no coincide con el modelo: {X.shape[1]} ≠ {input_dim}")
 
     # 4. Normalizar como en entrenamiento
     X = MinMaxScaler().fit_transform(X)
     X_tensor = torch.tensor(X, dtype=torch.float32)
 
     # 5. Predecir
-    with torch.no_grad():
-        outputs = model(X_tensor)
-        probs = F.softmax(outputs, dim=1).numpy()
-        preds = np.argmax(probs, axis=1)
+    if framework == "pytorch":
+        X_tensor = torch.tensor(X, dtype=torch.float32)
+        with torch.no_grad():
+            outputs = model(X_tensor)
+            probs = F.softmax(outputs, dim=1).numpy()
+            preds = np.argmax(probs, axis=1)
+            labels = le.inverse_transform(preds)
+    elif framework in ["scikit-learn", "thundersvm"]:
+        preds = model.predict(X)
         labels = le.inverse_transform(preds)
+        probs = None  # scikit-learn no da probs genéricas si no se implementa .predict_proba()
+
 
     # 6. Mostrar resultados
     print()
