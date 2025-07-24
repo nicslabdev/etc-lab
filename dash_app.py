@@ -111,6 +111,11 @@ app.layout = html.Div([
             html.Button("⏹️ Stop Capture", id="stop-button", n_clicks=0),
             html.Div(id="status"),
             dcc.Interval(id="update-interval", interval=500, n_intervals=0),
+            html.Label("Filter by label:"),
+            dcc.Checklist(id="live-label-filter", options=[], inline=True),
+            html.Label("Filter by IP (source or destination):"),
+            dcc.Dropdown(id="live-ip-filter", options=[], placeholder="Select or type an IP", multi=True, searchable=True),
+            html.Br(),
             dcc.Graph(id="live-graph"),
         ]),
 
@@ -128,7 +133,14 @@ app.layout = html.Div([
         html.Div(id="pcap-loading", children="", style={"marginTop": "10px", "color": "green"})
     ]
 ),
-            html.Div(id="pcap-summary"),
+            html.Div([
+    html.Label("Filter by label:"),
+    dcc.Checklist(id="label-filter", options=[], inline=True),
+    html.Label("Filter by IP (source or destination):"),
+    dcc.Dropdown(id="ip-filter", options=[], placeholder="Select or type an IP", multi=True, searchable=True),
+    html.Br(),
+], style={"marginTop": "10px"}),
+html.Div(id="pcap-summary"),
             dcc.Graph(id="pcap-graph"),
         ]),
     ])
@@ -181,24 +193,43 @@ def handle_capture(start_clicks, stop_clicks, filter_value):
 
 @app.callback(
     Output("live-graph", "figure"),
-    Input("update-interval", "n_intervals")
+    Output("live-label-filter", "options"),
+    Output("live-ip-filter", "options"),
+    Input("update-interval", "n_intervals"),
+    State("live-label-filter", "value"),
+    State("live-ip-filter", "value")
 )
-def update_live_graph(n):
+def update_live_graph(n, selected_labels, selected_ips):
     with lock:
         if not packet_buffer:
-            return px.scatter(title="Waiting for packets...")
+            empty_fig = px.scatter(title="Waiting for packets...")
+            return empty_fig, [], []
         df = pd.DataFrame(packet_buffer)
+    if selected_labels:
+        df = df[df["label"].isin(selected_labels)]
+    if selected_ips:
+        df = df[df["src"].isin(selected_ips) | df["dst"].isin(selected_ips)]
 
     df["Time"] = pd.to_datetime(df["timestamp"], unit="s")
     df.set_index("Time", inplace=True)
     df_resample = df.groupby("label").resample("100ms").size().reset_index(name="count")
-    fig = px.line(df_resample, x="Time", y="count", color="label")
-    return fig
+    fig = px.line(df_resample, x="Time", y="count", color="label", )
+
+    # Add percentage info to legend title
+    label_counts = df["label"].value_counts()
+    total = len(df)
+    fig.for_each_trace(lambda t: t.update(name=f"{t.name} ({label_counts[t.name] / total:.1%})"))
+    label_options = sorted(df["label"].unique())
+    options = [{'label': lbl, 'value': lbl} for lbl in label_options]
+    ip_options = sorted(set(df['src']).union(df['dst']))
+    ip_dropdown_options = [{'label': ip, 'value': ip} for ip in ip_options]
+    return fig, options, ip_dropdown_options
 
 @app.callback(
     Output("pcap-dropdown", "options"),
     Output("pcap-dropdown", "value"),
     Output("pcap-loading", "children"),
+    Output("label-filter", "options"),
     Input("upload-pcap", "contents"),
     State("upload-pcap", "filename"),
     prevent_initial_call=True
@@ -218,29 +249,42 @@ def load_pcap_file(contents, filenames):
         classified = [classify_packet(pkt) for pkt in packets if classify_packet(pkt)]
         pcap_results[name] = classified
 
-    return list(pcap_results.keys()), filenames[-1], "✅ PCAP files loaded successfully."  # select the last uploaded
+    labels_set = sorted({pkt["label"] for pkts in pcap_results.values() for pkt in pkts})
+    return list(pcap_results.keys()), filenames[-1], "✅ PCAP files loaded successfully.", [{'label': lbl, 'value': lbl} for lbl in labels_set]  # select the last uploaded
 
 @app.callback(
     Output("pcap-summary", "children"),
     Output("pcap-graph", "figure"),
-    Input("pcap-dropdown", "value")
+    Output("ip-filter", "options"),
+    Input("pcap-dropdown", "value"),
+    Input("label-filter", "value"),
+    Input("ip-filter", "value")
 )
-def display_pcap(name):
+def display_pcap(name, selected_labels, selected_ips):
     if not name or name not in pcap_results:
         raise PreventUpdate
 
     data = pcap_results[name]
     df = pd.DataFrame(data)
+    if selected_labels:
+        df = df[df["label"].isin(selected_labels)]
+    if selected_ips:
+        df = df[df["src"].isin(selected_ips) | df["dst"].isin(selected_ips)]
     df["Time"] = pd.to_datetime(df["timestamp"], unit="s")
 
     df.set_index("Time", inplace=True)
     df_resample = df.groupby("label").resample("100ms").size().reset_index(name="count")
-    fig = px.line(df_resample, x="Time", y="count", color="label", title=f"PCAP: {name}")
+    fig = px.line(df_resample, x="Time", y="count", color="label", title=f"PCAP: {name}", )
 
     summary = Counter(df["label"])
-    summary_html = html.Ul([html.Li(f"{label}: {count}") for label, count in summary.items()])
+    total = sum(summary.values())
+    summary_html = html.Ul([
+        html.Li(f"{label}: {count} ({count / total:.1%})") for label, count in summary.items()
+    ])
 
-    return summary_html, fig
+    ip_options = sorted(set(df['src']).union(df['dst']))
+    ip_dropdown_options = [{'label': ip, 'value': ip} for ip in ip_options]
+    return summary_html, fig, ip_dropdown_options
 
 # ======================= MAIN =======================
 if __name__ == "__main__":
