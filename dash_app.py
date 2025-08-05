@@ -36,6 +36,7 @@ lock = threading.Lock()
 running = False
 bpf_filter = ""
 pcap_results = {}  # Dictionary: filename -> list of classified packets
+pcap_biflows = {}  # filename -> list of biflow keys
 
 # ======================= PROCESSING FUNCTIONS =======================
 def extract_features(pkt):
@@ -94,10 +95,20 @@ def classify_packet(pkt):
     feat = scaler.transform(feat)
     pred = model.predict(feat)
     label = label_encoder.inverse_transform(pred)[0]
+
+    # Extract ports and protocol
+    src_port = pkt.sport if hasattr(pkt, 'sport') else None
+    dst_port = pkt.dport if hasattr(pkt, 'dport') else None
+    proto = pkt.proto if hasattr(pkt, 'proto') else (pkt[IP].proto if IP in pkt else None)
+    proto_str = {6: 'TCP', 17: 'UDP'}.get(proto, str(proto))
+
     return {
         "timestamp": time.time(),
         "src": pkt[IP].src if IP in pkt else "?",
         "dst": pkt[IP].dst if IP in pkt else "?",
+        "sport": src_port,
+        "dport": dst_port,
+        "proto": proto_str,
         "label": label,
         "len": len(pkt)
     }
@@ -142,6 +153,8 @@ app.layout = html.Div([
     dcc.Checklist(id="label-filter", options=[], inline=True),
     html.Label("Filter by IP (source or destination):"),
     dcc.Dropdown(id="ip-filter", options=[], placeholder="Select or type an IP", multi=True, searchable=True),
+    html.Label("Filter by biflow (IP:port ⬌ IP:port):"),
+    dcc.Dropdown(id="biflow-filter", options=[], placeholder="Select one or more biflows", multi=True),
     html.Br(),
 ], style={"marginTop": "10px"}),
 html.Div(id="pcap-summary"),
@@ -240,11 +253,10 @@ def update_live_graph(n, selected_labels, selected_ips):
 )
 def load_pcap_file(contents, filenames):
     """Loads PCAP files and classifies their packets while displaying progress."""
-    global pcap_results
+    global pcap_results, pcap_biflows
     if contents is None:
         raise PreventUpdate
 
-    loading_message = "⏳ Loading PCAP files..."
     for c, name in zip(contents, filenames):
         content_type, content_string = c.split(',')
         decoded = base64.b64decode(content_string)
@@ -253,32 +265,80 @@ def load_pcap_file(contents, filenames):
         classified = [classify_packet(pkt) for pkt in packets if classify_packet(pkt)]
         pcap_results[name] = classified
 
+        # Extract biflows from classified packets
+        biflow_keys = set()
+        for pkt in classified:
+            try:
+                if pkt["sport"] is None or pkt["dport"] is None:
+                    continue  # Skip packets without valid ports
+                ip1, ip2 = sorted([pkt["src"], pkt["dst"]])
+                port1, port2 = sorted([int(pkt["sport"]), int(pkt["dport"])])
+                proto = pkt["proto"]
+                biflow_keys.add(((ip1, port1), (ip2, port2), proto))
+            except Exception as e:
+                continue  # Skip if any issue with data
+
+
+        pcap_biflows[name] = list(biflow_keys)
+
     labels_set = sorted({pkt["label"] for pkts in pcap_results.values() for pkt in pkts})
-    return list(pcap_results.keys()), filenames[-1], "✅ PCAP files loaded successfully.", [{'label': lbl, 'value': lbl} for lbl in labels_set]  # select the last uploaded
+    return list(pcap_results.keys()), filenames[-1], "✅ PCAP files loaded successfully.", [{'label': lbl, 'value': lbl} for lbl in labels_set] # select the last uploaded
 
 @app.callback(
     Output("pcap-summary", "children"),
     Output("pcap-graph", "figure"),
     Output("ip-filter", "options"),
+    Output("biflow-filter", "options"),
     Input("pcap-dropdown", "value"),
     Input("label-filter", "value"),
-    Input("ip-filter", "value")
+    Input("ip-filter", "value"),
+    Input("biflow-filter", "value")
 )
-def display_pcap(name, selected_labels, selected_ips):
+def display_pcap(name, selected_labels, selected_ips, selected_biflows):
     if not name or name not in pcap_results:
         raise PreventUpdate
 
     data = pcap_results[name]
     df = pd.DataFrame(data)
+
     if selected_labels:
         df = df[df["label"].isin(selected_labels)]
     if selected_ips:
         df = df[df["src"].isin(selected_ips) | df["dst"].isin(selected_ips)]
-    df["Time"] = pd.to_datetime(df["timestamp"], unit="s")
 
+    def pkt_to_biflow_key(pkt):
+        try:
+            if pkt["sport"] is None or pkt["dport"] is None:
+                return None
+            ip1, ip2 = sorted([pkt["src"], pkt["dst"]])
+            port1, port2 = sorted([int(pkt["sport"]), int(pkt["dport"])])
+            proto = pkt["proto"]
+            return ((ip1, port1), (ip2, port2), proto)
+        except:
+            return None
+        
+    def biflow_key_to_str(key):
+        (ip1, port1), (ip2, port2), proto = key
+        return f"[{proto}] {ip1}:{port1} ⬌ {ip2}:{port2}"
+
+    df["biflow_key"] = df.apply(pkt_to_biflow_key, axis=1)
+    df = df[df["biflow_key"].notna()]
+    df["biflow_str"] = df["biflow_key"].apply(biflow_key_to_str)
+
+    if selected_biflows:
+        df = df[df["biflow_str"].isin(selected_biflows)]
+
+    print("Selected biflows:", selected_biflows)
+    print("DF after biflow filtering:", df.shape)
+
+    if df.empty:
+        return html.Div("⚠️ No data after biflow filter."), px.scatter(title="No data"), [], []
+
+
+    df["Time"] = pd.to_datetime(df["timestamp"], unit="s")
     df.set_index("Time", inplace=True)
     df_resample = df.groupby("label").resample("100ms").size().reset_index(name="count")
-    fig = px.line(df_resample, x="Time", y="count", color="label", title=f"PCAP: {name}", )
+    fig = px.line(df_resample, x="Time", y="count", color="label", title=f"PCAP: {name}")
 
     summary = Counter(df["label"])
     total = sum(summary.values())
@@ -288,7 +348,18 @@ def display_pcap(name, selected_labels, selected_ips):
 
     ip_options = sorted(set(df['src']).union(df['dst']))
     ip_dropdown_options = [{'label': ip, 'value': ip} for ip in ip_options]
-    return summary_html, fig, ip_dropdown_options
+
+    # Count packets per biflow_str
+    biflow_counts = df["biflow_str"].value_counts().to_dict()
+    biflows = pcap_biflows.get(name, [])
+    biflow_options = [{
+        "label": f"{biflow_key_to_str(key)} ({biflow_counts.get(biflow_key_to_str(key), 0)} pkts)",
+        "value": biflow_key_to_str(key)
+    } for key in biflows]
+
+
+
+    return summary_html, fig, ip_dropdown_options, biflow_options
 
 # ======================= MAIN =======================
 if __name__ == "__main__":
