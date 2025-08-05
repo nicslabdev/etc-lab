@@ -16,9 +16,13 @@ from dash.exceptions import PreventUpdate
 import plotly.express as px
 
 # ======================= MODEL AND CONFIG =======================
-MODEL_PATH = "models/randomforest_data1000_N100_BIT8.joblib"
-SCALER_PATH = "models/scaler_data1000_N100_BIT8.joblib"
-ENCODER_PATH = "models/le_data1000_N100_BIT8.joblib"
+#MODEL_PATH = "models/randomforest_data1000_N100_BIT8.joblib"
+#SCALER_PATH = "models/scaler_data1000_N100_BIT8.joblib"
+#ENCODER_PATH = "models/le_data1000_N100_BIT8.joblib"
+
+MODEL_PATH = "models/randomforest_iscxcustom_N100_BIT8.joblib"
+SCALER_PATH = "models/scaler_iscxcustom_N100_BIT8.joblib"
+ENCODER_PATH = "models/le_iscxcustom_N100_BIT8.joblib"
 
 model = load(MODEL_PATH)
 scaler = load(SCALER_PATH)
