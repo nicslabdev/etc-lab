@@ -158,7 +158,10 @@ app.layout = html.Div([
     html.Br(),
 ], style={"marginTop": "10px"}),
 html.Div(id="pcap-summary"),
-            dcc.Graph(id="pcap-graph"),
+dcc.Graph(id="pcap-graph"),
+html.Hr(),
+html.H4("📊 Label distribution per biflow (independent of filters)"),
+dcc.Graph(id="biflow-label-graph"),
         ]),
     ])
 ])
@@ -289,6 +292,7 @@ def load_pcap_file(contents, filenames):
     Output("pcap-graph", "figure"),
     Output("ip-filter", "options"),
     Output("biflow-filter", "options"),
+    Output("biflow-label-graph", "figure"),
     Input("pcap-dropdown", "value"),
     Input("label-filter", "value"),
     Input("ip-filter", "value"),
@@ -358,8 +362,29 @@ def display_pcap(name, selected_labels, selected_ips, selected_biflows):
     } for key in biflows]
 
 
+    # === Generate biflow-wise label distribution chart (unfiltered) ===
+    df_all = pd.DataFrame(pcap_results[name])
+    df_all["biflow_key"] = df_all.apply(pkt_to_biflow_key, axis=1)
+    df_all = df_all[df_all["biflow_key"].notna()]
+    df_all["biflow_str"] = df_all["biflow_key"].apply(biflow_key_to_str)
 
-    return summary_html, fig, ip_dropdown_options, biflow_options
+    # Group by biflow and label, then count
+    grouped = df_all.groupby(["biflow_str", "label"]).size().reset_index(name="count")
+
+    # Create stacked bar chart
+    biflow_label_fig = px.bar(
+        grouped,
+        x="biflow_str",
+        y="count",
+        color="label",
+        title="Label distribution per biflow",
+    )
+
+    # Rotate x labels for readability
+    biflow_label_fig.update_layout(xaxis_tickangle=-45, barmode="stack", height=500)
+
+
+    return summary_html, fig, ip_dropdown_options, biflow_options, biflow_label_fig
 
 # ======================= MAIN =======================
 if __name__ == "__main__":
