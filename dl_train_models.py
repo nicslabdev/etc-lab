@@ -357,23 +357,32 @@ def save_confusion_and_dendrogram(y_true, y_pred, class_labels, model_name, inpu
 # Export model
 # -------------------------------
 
-def export_model_bundle(model, le, input_file, model_name, input_dim, model_save_dir="models"):
+def export_model_bundle(model, le, input_file, model_name, input_dim, scaler=None, model_save_dir="models"):
     from joblib import dump
+    import os
+    import json
+    from datetime import datetime
+    import torch
 
     os.makedirs(model_save_dir, exist_ok=True)
 
-    # File name
-    base_name = f"{model_name.lower()}_{os.path.splitext(os.path.basename(input_file))[0]}"
+    # Base names
+    base_input = os.path.splitext(os.path.basename(input_file))[0]
+    base_name = f"{model_name.lower()}_{base_input}"
+    
+    # File names
     model_filename = f"{base_name}.pt"
-    le_filename = f"le_{os.path.splitext(os.path.basename(input_file))[0]}.joblib"
+    le_filename = f"le_{base_input}.joblib"
+    scaler_filename = f"scaler_{base_input}.joblib"
     config_filename = f"{base_name}.json"
 
-    # Complete paths
+    # Paths
     model_path = os.path.join(model_save_dir, model_filename)
     le_path = os.path.join(model_save_dir, le_filename)
+    scaler_path = os.path.join(model_save_dir, scaler_filename)
     config_path = os.path.join(model_save_dir, config_filename)
 
-    # Save model
+    # Save model weights
     torch.save(model.state_dict(), model_path)
     print(f"💾 Model saved in: {model_path}")
 
@@ -381,16 +390,25 @@ def export_model_bundle(model, le, input_file, model_name, input_dim, model_save
     dump(le, le_path)
     print(f"💾 LabelEncoder saved in: {le_path}")
 
-    # Save config.json
+    # Save Scaler (if provided)
+    if scaler is not None:
+        dump(scaler, scaler_path)
+        print(f"💾 Scaler saved in: {scaler_path}")
+    else:
+        scaler_filename = None
+
+    # Save configuration
     config = {
         "model_name": model_name.lower(),
+        "framework": "pytorch",
         "input_file": os.path.basename(input_file),
         "input_dim": input_dim,
         "num_classes": len(le.classes_),
         "class_labels": le.classes_.tolist(),
         "created_at": datetime.now().isoformat(),
         "model_file": model_filename,
-        "label_encoder_file": le_filename
+        "label_encoder_file": le_filename,
+        "scaler_file": scaler_filename
     }
 
     with open(config_path, "w") as f:
@@ -445,7 +463,7 @@ def main():
         metrics, y_true, y_pred = evaluate_model(trained_model, test_loader, device=device)
 
         if args.export:
-            export_model_bundle(trained_model, le, input_file, model_name, input_dim=input_dim)
+            export_model_bundle(trained_model, le, input_file, model_name, input_dim=input_dim, scaler=scaler)
 
         # Save graphs
         save_confusion_and_dendrogram(
