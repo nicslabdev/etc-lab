@@ -95,7 +95,7 @@ def test_classifier(model_name, X_train, X_test, y_train, y_test, label_encoder)
         "Weighted F1": round(weighted["f1-score"], 4),
     }, clf
     
-def export_model_bundle(model, le, scaler, input_file, model_name, model_save_dir="models"):
+def export_model_bundle(model, le, scaler, input_file, model_name, input_dim, framework="scikit-learn", model_save_dir="models"):
     from joblib import dump
     import os
     import json
@@ -131,7 +131,8 @@ def export_model_bundle(model, le, scaler, input_file, model_name, model_save_di
     config = {
         "model_name": model_name.lower(),
         "input_file": os.path.basename(input_file),
-        "framework": "scikit-learn",
+        "framework": framework,
+        "input_dim": input_dim,
         "num_classes": len(le.classes_),
         "class_labels": le.classes_.tolist(),
         "model_file": os.path.basename(model_path),
@@ -203,43 +204,18 @@ def main():
         summary.append(result)
 
         if args.export:
+            is_svm_family = model.lower() in ("svm", "linearsvm")
+            framework = "thundersvm" if (THUNDERSVM_OK and is_svm_family) else "scikit-learn"
+        
             export_model_bundle(
                 model=clf,
                 le=label_encoder,
                 scaler=scaler,
                 input_file=input_file,
-                model_name=model
+                model_name=model,
+                input_dim=X.shape[1],
+                framework=framework
             )
-
-    if args.export:
-        from joblib import dump
-        import os
-        import json
-        from datetime import datetime
-
-        os.makedirs("models", exist_ok=True)
-        base_name = f"{model.lower()}_{os.path.splitext(os.path.basename(input_file))[0]}"
-        scaler_file = f"scaler_{os.path.splitext(os.path.basename(input_file))[0]}.joblib"
-        dump(scaler, os.path.join("models", scaler_file))
-        
-        config = {
-            "model_name": model.lower(),
-            "input_file": os.path.basename(input_file),
-            "framework": "scikit-learn" if not THUNDERSVM_OK else "thundersvm",
-            "input_dim": X.shape[1],
-            "num_classes": len(label_encoder.classes_),
-            "class_labels": label_encoder.classes_.tolist(),
-            "model_file": f"{base_name}.joblib",
-            "label_encoder_file": f"le_{os.path.splitext(os.path.basename(input_file))[0]}.joblib",
-            "scaler_file": scaler_file,
-            "created_at": datetime.now().isoformat()
-        }
-
-        with open(os.path.join("models", f"{base_name}.json"), "w") as f:
-            json.dump(config, f, indent=4)
-
-        print(f"🔧 Scaler saved in: models/{scaler_file}")
-
 
     # Show summary table
     print("\nSummary:")
