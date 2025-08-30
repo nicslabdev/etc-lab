@@ -22,7 +22,7 @@ from datetime import datetime
 from joblib import dump
 
 # -------------------------------
-# MLP Modelo
+# MLP
 # -------------------------------
 class MLP(nn.Module):
     def __init__(self, input_dim, num_classes):
@@ -155,7 +155,7 @@ class CNN1D(nn.Module):
         self.pool = nn.MaxPool1d(kernel_size=2)
         self.dropout = nn.Dropout(0.05)
 
-        # Calcular salida final de convoluciones para conectar con capa densa
+        # Calculate final output of convolutions to connect to dense layer
         conv_output_len = self._compute_conv_output_length(input_dim)
 
         self.fc1 = nn.Linear(conv_output_len * 200, 200)
@@ -308,7 +308,7 @@ def save_confusion_and_dendrogram(y_true, y_pred, class_labels, model_name, inpu
     os.makedirs(out_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    # Construir nombre base
+    # Build base name
     safe_input = os.path.splitext(os.path.basename(input_name))[0]
     base_name = f"{model_name.lower()}_{safe_input}_{timestamp}"
 
