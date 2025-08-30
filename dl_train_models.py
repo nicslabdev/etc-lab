@@ -272,6 +272,50 @@ def train_model_with_early_stopping(model, dataset, batch_size=128, epochs=50, p
     model.load_state_dict(best_state)
     return model, test_loader
 
+def train_model_with_early_stopping_from_loaders(model, train_loader, val_loader, test_loader, epochs=50, patience=5, lr=1e-3, device='cpu'):
+    model = model.to(device)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    criterion = nn.CrossEntropyLoss()
+
+    best_val_loss = float('inf')
+    best_state = None
+    patience_counter = 0
+
+    for epoch in range(epochs):
+        model.train()
+        train_loss = 0.0
+        for x, y in train_loader:
+            x, y = x.to(device), y.to(device)
+            optimizer.zero_grad()
+            loss = criterion(model(x), y)
+            loss.backward()
+            optimizer.step()
+            train_loss += loss.item()
+
+        model.eval()
+        val_loss = 0.0
+        with torch.no_grad():
+            for x, y in val_loader:
+                x, y = x.to(device), y.to(device)
+                val_loss += criterion(model(x), y).item()
+
+        avg_train = train_loss / max(1, len(train_loader))
+        avg_val   = val_loss   / max(1, len(val_loader))
+        print(f"Epoch {epoch+1}: Train Loss = {avg_train:.4f}, Val Loss = {avg_val:.4f}")
+
+        if avg_val < best_val_loss:
+            best_val_loss = avg_val
+            best_state = model.state_dict()
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            if patience_counter >= patience:
+                print("⏹️ Early stopping triggered.")
+                break
+
+    model.load_state_dict(best_state)
+    return model, test_loader
+
 # -------------------------------
 # Final evaluation
 # -------------------------------
@@ -439,14 +483,46 @@ def main():
     y = data["y"]
 
     print("🧪 Normalizing and preparing dataset...")
-    scaler = MinMaxScaler()
-    X = scaler.fit_transform(X)
-    le = LabelEncoder()
-    y = le.fit_transform(y)
 
-    X_tensor = torch.tensor(X, dtype=torch.float32)
-    y_tensor = torch.tensor(y, dtype=torch.long)
-    dataset = TensorDataset(X_tensor, y_tensor)
+    # 1) Encode labels
+    le = LabelEncoder()
+    y_enc = le.fit_transform(y)
+
+    # 2) Random split 64/16/20 (non-stratified)
+    N = X.shape[0]
+    rng = np.random.default_rng(42)
+    perm = rng.permutation(N)
+    n_train = int(0.64 * N)
+    n_val   = int(0.16 * N)
+    train_idx = perm[:n_train]
+    val_idx   = perm[n_train:n_train+n_val]
+    test_idx  = perm[n_train+n_val:]
+
+    # 3) Fit scaler only with X_train and transform each partition
+    scaler = MinMaxScaler().fit(X[train_idx])
+    X_train = scaler.transform(X[train_idx])
+    X_val   = scaler.transform(X[val_idx])
+    X_test  = scaler.transform(X[test_idx])
+
+    # 4) Tensors and DataLoaders
+    Xtr_t = torch.tensor(X_train, dtype=torch.float32)
+    Xva_t = torch.tensor(X_val,   dtype=torch.float32)
+    Xte_t = torch.tensor(X_test,  dtype=torch.float32)
+    ytr_t = torch.tensor(y_enc[train_idx], dtype=torch.long)
+    yva_t = torch.tensor(y_enc[val_idx],   dtype=torch.long)
+    yte_t = torch.tensor(y_enc[test_idx],  dtype=torch.long)
+
+    train_set = TensorDataset(Xtr_t, ytr_t)
+    val_set   = TensorDataset(Xva_t, yva_t)
+    test_set  = TensorDataset(Xte_t, yte_t)
+
+    train_loader = DataLoader(train_set, batch_size=128, shuffle=True)
+    val_loader   = DataLoader(val_set,   batch_size=128)
+    test_loader  = DataLoader(test_set,  batch_size=128)
+
+    # 5) Dataset for pretraining SAE (inputs=targets)
+    train_only_sae = TensorDataset(Xtr_t, Xtr_t)
+
     input_dim = X.shape[1]
     num_classes = len(le.classes_)
 
@@ -456,8 +532,8 @@ def main():
         print(f"\n🚀 Training model: {model_name.upper()}")
         start_time = time.time()
 
-        model = select_dl_model(model_name, input_dim, num_classes, dataset=dataset, device=device)
-        trained_model, test_loader = train_model_with_early_stopping(model, dataset, device=device)
+        model = select_dl_model(model_name, input_dim, num_classes, dataset=train_only_sae, device=device)
+        trained_model, _ = train_model_with_early_stopping_from_loaders(model, train_loader, val_loader, test_loader, device=device)
         metrics, y_true, y_pred = evaluate_model(trained_model, test_loader, device=device)
 
         if args.export:
