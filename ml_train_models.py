@@ -15,7 +15,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 from tabulate import tabulate  # pip install tabulate if not already installed
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
-from sklearn.preprocessing import LabelEncoder  # 💡 CAMBIO: Añadir LabelEncoder
+from sklearn.preprocessing import LabelEncoder
 try:
     from thundersvm import SVC as thunderSVC
     THUNDERSVM_OK = True
@@ -50,7 +50,7 @@ def select_classifier(model_name):
 # -------------------------------
 # Train and evaluate a model
 # -------------------------------
-def test_classifier(model_name, X_train, X_test, y_train, y_test, label_encoder):  # 💡 CAMBIO: añadir label_encoder
+def test_classifier(model_name, X_train, X_test, y_train, y_test, label_encoder):
     clf = select_classifier(model_name)
 
     start_time = time.time()
@@ -64,7 +64,7 @@ def test_classifier(model_name, X_train, X_test, y_train, y_test, label_encoder)
 
     report = classification_report(
         y_test, y_pred, output_dict=True,
-        target_names=label_encoder.classes_,  # 💡 CAMBIO
+        target_names=label_encoder.classes_,
         zero_division=0
     )
     
@@ -81,7 +81,7 @@ def test_classifier(model_name, X_train, X_test, y_train, y_test, label_encoder)
     print(f"Weighted Recall:    {weighted['recall']:.4f}")
     print(f"Weighted F1-score:  {weighted['f1-score']:.4f}")
     print(classification_report(
-        y_test, y_pred, target_names=label_encoder.classes_, zero_division=0))  # 💡 CAMBIO
+        y_test, y_pred, target_names=label_encoder.classes_, zero_division=0))
 
     return {
         "Model": model_name.lower(),
@@ -103,31 +103,31 @@ def export_model_bundle(model, le, scaler, input_file, model_name, input_dim, fr
 
     os.makedirs(model_save_dir, exist_ok=True)
 
-    # Nombre base
+    # Base name
     base_name = f"{model_name.lower()}_{os.path.splitext(os.path.basename(input_file))[0]}"
     
-    # Nombres de archivos
+    # File names
     model_filename = f"{base_name}.joblib"
     le_filename = f"le_{os.path.splitext(os.path.basename(input_file))[0]}.joblib"
     scaler_filename = f"scaler_{os.path.splitext(os.path.basename(input_file))[0]}.joblib"
     config_filename = f"{base_name}.json"
 
-    # Rutas completas
+    # Paths
     model_path = os.path.join(model_save_dir, model_filename)
     le_path = os.path.join(model_save_dir, le_filename)
     scaler_path = os.path.join(model_save_dir, scaler_filename)
     config_path = os.path.join(model_save_dir, config_filename)
 
-    # Guardar modelo, LabelEncoder y Scaler
+    # Save model, LabelEncoder, and Scaler
     dump(model, model_path)
     dump(le, le_path)
     dump(scaler, scaler_path)
 
-    print(f"💾 Modelo guardado en: {model_path}")
-    print(f"💾 LabelEncoder guardado en: {le_path}")
-    print(f"💾 Scaler guardado en: {scaler_path}")
+    print(f"💾 Model saved in: {model_path}")
+    print(f"💾 LabelEncoder saved in: {le_path}")
+    print(f"💾 Scaler saved in: {scaler_path}")
 
-    # Guardar configuración
+    # Save config
     config = {
         "model_name": model_name.lower(),
         "input_file": os.path.basename(input_file),
@@ -144,7 +144,7 @@ def export_model_bundle(model, le, scaler, input_file, model_name, input_dim, fr
     with open(config_path, "w") as f:
         json.dump(config, f, indent=4)
 
-    print(f"📝 Configuración guardada en: {config_path}")
+    print(f"📝 Config saved in: {config_path}")
 
 
 # -------------------------------
@@ -165,7 +165,7 @@ def main():
     args = parser.parse_args()
 
     if 'svm' in [m.lower() for m in args.models] and not THUNDERSVM_OK:
-        print("⚠️ ThunderSVM no está instalado. Usando SVC de scikit-learn (CPU).")
+        print("WARNING: ThunderSVM is not installed. Using scikit-learn's SVC (CPU).")
 
 
     input_file = args.input
@@ -176,15 +176,15 @@ def main():
     X = data["X"].astype(np.float32)
     y = data["y"]
     if args.train_fraction < 1.0:
-        print(f"📉 Reducing dataset to {int(args.train_fraction * 100)}% using stratified sampling...")
+        print(f"Reducing dataset to {int(args.train_fraction * 100)}% using stratified sampling...")
         sss = StratifiedShuffleSplit(n_splits=1, train_size=args.train_fraction, random_state=42)
         idx, _ = next(sss.split(X, y))
         X = X[idx]
         y = y[idx]
 
-    print("Encoding string labels...")  # 💡 CAMBIO
+    print("Encoding string labels...")
     label_encoder = LabelEncoder()
-    y_encoded = label_encoder.fit_transform(y)  # 💡 CAMBIO
+    y_encoded = label_encoder.fit_transform(y)
 
     print("Normalizing features...")
     scaler = MinMaxScaler()
