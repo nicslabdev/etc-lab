@@ -186,14 +186,16 @@ def main():
     label_encoder = LabelEncoder()
     y_encoded = label_encoder.fit_transform(y)
 
-    print("Normalizing features...")
-    scaler = MinMaxScaler()
-    X = scaler.fit_transform(X)
-
     print("Splitting into train/test sets...")
     X_train, X_test, y_train, y_test = train_test_split(
         X, y_encoded, test_size=0.33, stratify=y_encoded, random_state=42
     )
+
+    print("Normalizing features (fit on TRAIN only)...")
+    scaler = MinMaxScaler().fit(X_train)
+    X_train = scaler.transform(X_train)
+    X_test  = scaler.transform(X_test)
+
 
     available_models = ['knn', 'gaussiannb', 'svm', 'randomforest', 'softmax', 'xgboost', 'lgbm']
     models_to_run = available_models if 'all' in [m.lower() for m in selected_models] else selected_models
