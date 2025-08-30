@@ -137,9 +137,9 @@ def main():
                 print(f"- {class_labels[i]}: {p:.2f}")
 
     else:
-        print("🔍 Predicciones por paquete:")
-        for i, label in enumerate(labels):
-            print(f"Paquete {i+1} → {label}")
+        #print("🔍 Predicciones por paquete:")
+        #for i, label in enumerate(labels):
+        #    print(f"Paquete {i+1} → {label}")
 
         counts = Counter(labels)
         total = sum(counts.values())
