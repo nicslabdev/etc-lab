@@ -458,8 +458,6 @@ def main():
 
         model = select_dl_model(model_name, input_dim, num_classes, dataset=dataset, device=device)
         trained_model, test_loader = train_model_with_early_stopping(model, dataset, device=device)
-        metrics = evaluate_model(trained_model, test_loader, device=device)
-
         metrics, y_true, y_pred = evaluate_model(trained_model, test_loader, device=device)
 
         if args.export:
