@@ -64,7 +64,7 @@ class AutoencoderBlock(nn.Module):
         super(AutoencoderBlock, self).__init__()
         self.encoder = nn.Linear(input_dim, hidden_dim)
         self.decoder = nn.Linear(hidden_dim, input_dim)
-        self.activation = nn.ReLU()
+        self.activation = nn.ReLU(inplace=True)
 
     def forward(self, x):
         encoded = self.activation(self.encoder(x))
@@ -101,7 +101,7 @@ class SAEClassifier(nn.Module):
         self.encoders = nn.ModuleList([
             nn.Sequential(
                 nn.Linear(layer_dims[i], layer_dims[i+1]),
-                nn.ReLU(),
+                nn.ReLU(inplace=True),
                 nn.Dropout(0.05)
             ) for i in range(len(layer_dims) - 1)
         ])
@@ -117,24 +117,52 @@ class SAEClassifier(nn.Module):
             x = encoder(x)
         return x
     
+
+"""
+Encodes data_cpu (tensor on CPU) with the block's encoder, in mini-batches.
+Returns a CPU tensor with shape = [N, hidden_dim].
+"""
+def _encode_dataset_batched(block, data_cpu, batch_size=2048, device='cuda'):
+    block.eval()
+    outs = []
+    with torch.no_grad():
+        for i in range(0, data_cpu.size(0), batch_size):
+            xb = data_cpu[i:i+batch_size].to(device, non_blocking=True)
+            zb = block.activation(block.encoder(xb))
+            outs.append(zb.detach().cpu())  # return to the CPU so as not to use VRAM.
+    return torch.cat(outs, dim=0)
+
+    
 def pretrain_sae(model, dataset, layer_dims, batch_size=128, pretrain_epochs=20, device='cpu'):
-    current_data = dataset.tensors[0]
+    current_data = dataset.tensors[0].cpu().contiguous()
+
     for i in range(len(layer_dims) - 1):
         print(f"\n🧱 Pretraining layer {i+1}/{len(layer_dims) - 1}: {layer_dims[i]} ➝ {layer_dims[i+1]}")
         block = AutoencoderBlock(layer_dims[i], layer_dims[i+1])
+
         temp_dataset = TensorDataset(current_data, current_data)
-        temp_loader = DataLoader(temp_dataset, batch_size=batch_size, shuffle=True)
+        temp_loader = DataLoader(
+            temp_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            pin_memory=(str(device).startswith('cuda')),
+            num_workers=0
+        )
+
         block = train_autoencoder_block(block, temp_loader, epochs=pretrain_epochs, device=device, layer_idx=i+1)
 
-        # Transfer weights to the main model
-        model.encoders[i][0].weight.data = block.encoder.weight.data.clone()
-        model.encoders[i][0].bias.data = block.encoder.bias.data.clone()
+        # Copy weights to the main model (without extra clone)
+        model.encoders[i][0].weight.data.copy_(block.encoder.weight.data)
+        model.encoders[i][0].bias.data.copy_(block.encoder.bias.data)
 
-        # Feed forward to get next input
-        block.eval()
-        with torch.no_grad():
-            current_data = current_data.to(device)
-            current_data = block.activation(block.encoder(current_data))
+        # Encode in mini-batches on GPU and return to CPU
+        encode_bs = max(1024, batch_size)  # ajustable
+        current_data = _encode_dataset_batched(block, current_data, batch_size=encode_bs, device=device)
+
+        # Free up VRAM between layers
+        del block
+        if str(device).startswith('cuda'):
+            torch.cuda.empty_cache()
 
     return model
 
