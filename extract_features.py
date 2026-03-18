@@ -110,7 +110,7 @@ def main():
     parser.add_argument("--N", type=int, default=100, help="Sliding window size in bytes. Use 0 to extract entire packet.")
     parser.add_argument("--bit_type", type=int, default=8, choices=[1, 2, 4, 8], help="Bitization type: 1, 2, 4, or 8")
     parser.add_argument("--balance", action="store_true", help="Whether to balance classes to the smallest size")
-    parser.add_argument("--experimental", action="store_true", help="Remove TCP options from packets")
+    parser.add_argument("--noopt", action="store_true", help="Remove TCP options from packets")
 
     args = parser.parse_args()
 
@@ -118,14 +118,14 @@ def main():
     N = args.N
     bit_type = args.bit_type
     balance = args.balance
-    experimental = args.experimental
+    noopt = args.noopt
     pcap_dir = args.pcap_dir
 
     filename_parts = [f"{dataset_name}_N{N}", f"BIT{bit_type}"]
     if balance:
         filename_parts.append("balanced")
-    if experimental:
-        filename_parts.append("experimental")
+    if noopt:
+        filename_parts.append("noopt")
     output_filename = "_".join(filename_parts) + ".npz"
     output_path = os.path.join("features", output_filename)
     os.makedirs("features", exist_ok=True)
@@ -183,7 +183,7 @@ def main():
         features = extract_features(
             packets, N if N > 0 else None, use_ip_layer=True,
             remove_ip_port=True, udp_padding=True, filter_ipv6=True,
-            remove_tcp_options=experimental
+            remove_tcp_options=noopt
         )
         X.extend(features)
         y.extend([label] * len(features))
