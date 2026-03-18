@@ -8,10 +8,11 @@ from glob import glob
 import random
 from tqdm import tqdm
 from scapy.all import rdpcap
-from scapy.layers.inet import IP, UDP
+from scapy.layers.inet import IP, UDP, TCP
 from scapy.layers.inet6 import IPv6
 
-def extract_features(packets, N=None, use_ip_layer=False, remove_ip_port=True, udp_padding=True, filter_ipv6=True):
+def extract_features(packets, N=None, use_ip_layer=False, remove_ip_port=True, udp_padding=True,
+                     filter_ipv6=True, remove_tcp_options=False):
     features = []
     if N is None or N == 0:
         max_len = max(len(bytes(pkt[IP])) if IP in pkt else len(bytes(pkt)) for pkt in packets)
@@ -26,6 +27,19 @@ def extract_features(packets, N=None, use_ip_layer=False, remove_ip_port=True, u
             raw_bytes = bytes(pkt[IP])[:max_len]
         else:
             raw_bytes = bytes(pkt)[:max_len]
+
+        if remove_tcp_options and TCP in pkt and len(raw_bytes) > 33:
+            ip_header_len = (raw_bytes[0] & 0x0F) * 4
+            tcp_offset = ip_header_len
+
+            if len(raw_bytes) > tcp_offset + 12:
+                tcp_header_len = ((raw_bytes[tcp_offset + 12] >> 4) & 0xF) * 4
+
+                if tcp_header_len > 20:
+                    options_start = tcp_offset + 20
+                    options_end = tcp_offset + tcp_header_len
+                    if len(raw_bytes) >= options_end:
+                        raw_bytes = raw_bytes[:options_start] + raw_bytes[options_end:]
 
         if remove_ip_port and len(raw_bytes) > 24:
             raw_bytes = raw_bytes[:12] + raw_bytes[24:]
@@ -96,6 +110,7 @@ def main():
     parser.add_argument("--N", type=int, default=100, help="Sliding window size in bytes. Use 0 to extract entire packet.")
     parser.add_argument("--bit_type", type=int, default=8, choices=[1, 2, 4, 8], help="Bitization type: 1, 2, 4, or 8")
     parser.add_argument("--balance", action="store_true", help="Whether to balance classes to the smallest size")
+    parser.add_argument("--experimental", action="store_true", help="Remove TCP options from packets")
 
     args = parser.parse_args()
 
@@ -103,11 +118,14 @@ def main():
     N = args.N
     bit_type = args.bit_type
     balance = args.balance
+    experimental = args.experimental
     pcap_dir = args.pcap_dir
 
     filename_parts = [f"{dataset_name}_N{N}", f"BIT{bit_type}"]
     if balance:
         filename_parts.append("balanced")
+    if experimental:
+        filename_parts.append("experimental")
     output_filename = "_".join(filename_parts) + ".npz"
     output_path = os.path.join("features", output_filename)
     os.makedirs("features", exist_ok=True)
@@ -164,7 +182,8 @@ def main():
         packets = rdpcap(pcap_file)
         features = extract_features(
             packets, N if N > 0 else None, use_ip_layer=True,
-            remove_ip_port=True, udp_padding=True, filter_ipv6=True
+            remove_ip_port=True, udp_padding=True, filter_ipv6=True,
+            remove_tcp_options=experimental
         )
         X.extend(features)
         y.extend([label] * len(features))
