@@ -7,6 +7,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.naive_bayes import GaussianNB
+from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import SGDClassifier
 from sklearn.svm import LinearSVC
@@ -37,6 +38,7 @@ def select_classifier(model_name):
         'linearsvm': lambda: thunderSVC(kernel='linear'),
         #'svm': lambda: SVC(kernel='rbf'),
         #'linearsvm': lambda: LinearSVC(max_iter=10000),
+        'cart': lambda: DecisionTreeClassifier(criterion="gini"),
         'randomforest': lambda: RandomForestClassifier(n_estimators=100),
         'softmax': lambda: SGDClassifier(loss='log_loss', learning_rate='constant', eta0=0.01, max_iter=1000, tol=1e-3),
         'xgboost': lambda: XGBClassifier(use_label_encoder=False, eval_metric='mlogloss', verbosity=0),
@@ -197,7 +199,7 @@ def main():
     X_test  = scaler.transform(X_test)
 
 
-    available_models = ['knn', 'gaussiannb', 'svm', 'randomforest', 'softmax', 'xgboost', 'lgbm']
+    available_models = ['knn', 'gaussiannb', 'svm', 'cart', 'randomforest', 'softmax', 'xgboost', 'lgbm']
     models_to_run = available_models if 'all' in [m.lower() for m in selected_models] else selected_models
 
     summary = []
@@ -216,7 +218,8 @@ def main():
                 input_file=input_file,
                 model_name=model,
                 input_dim=X.shape[1],
-                framework=framework
+                framework=framework,
+                model_save_dir="/mnt/AI-DATA/pablosanserr/cosic/captures/models"
             )
 
     # Show summary table
