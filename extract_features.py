@@ -12,7 +12,7 @@ from scapy.layers.inet import IP, UDP, TCP
 from scapy.layers.inet6 import IPv6
 
 def extract_features(packets, N=None, use_ip_layer=False, remove_ip_port=True, udp_padding=True,
-                     filter_ipv6=True, remove_tcp_options=False):
+                     filter_ipv6=True, remove_tcp_options=False, remove_checksums=False):
     features = []
     if N is None or N == 0:
         max_len = max(len(bytes(pkt[IP])) if IP in pkt else len(bytes(pkt)) for pkt in packets)
@@ -28,8 +28,11 @@ def extract_features(packets, N=None, use_ip_layer=False, remove_ip_port=True, u
         else:
             raw_bytes = bytes(pkt)[:max_len]
 
-        if remove_tcp_options and TCP in pkt and len(raw_bytes) > 33:
+        ip_header_len = None
+        if IP in pkt and len(raw_bytes) > 0:
             ip_header_len = (raw_bytes[0] & 0x0F) * 4
+
+        if remove_tcp_options and TCP in pkt and len(raw_bytes) > 33:
             tcp_offset = ip_header_len
 
             if len(raw_bytes) > tcp_offset + 12:
@@ -43,6 +46,17 @@ def extract_features(packets, N=None, use_ip_layer=False, remove_ip_port=True, u
 
         if remove_ip_port and len(raw_bytes) > 24:
             raw_bytes = raw_bytes[:12] + raw_bytes[24:]
+
+        if remove_checksums:
+            if TCP in pkt and ip_header_len is not None:
+                tcp_checksum_pos = ip_header_len + 16
+                if remove_ip_port and tcp_checksum_pos >= 24:
+                    tcp_checksum_pos -= 12
+                if len(raw_bytes) >= tcp_checksum_pos + 2:
+                    raw_bytes = raw_bytes[:tcp_checksum_pos] + raw_bytes[tcp_checksum_pos + 2:]
+
+            if len(raw_bytes) >= 12:
+                raw_bytes = raw_bytes[:10] + raw_bytes[12:]
 
         if udp_padding and UDP in pkt and len(raw_bytes) > 28:
             raw_bytes = raw_bytes[:28] + b'\x00' * 12 + raw_bytes[28:]
@@ -111,6 +125,7 @@ def main():
     parser.add_argument("--bit_type", type=int, default=8, choices=[1, 2, 4, 8], help="Bitization type: 1, 2, 4, or 8")
     parser.add_argument("--balance", action="store_true", help="Whether to balance classes to the smallest size")
     parser.add_argument("--noopt", action="store_true", help="Remove TCP options from packets")
+    parser.add_argument("--nocs", action="store_true", help="Remove IP and TCP checksums from packets")
 
     args = parser.parse_args()
 
@@ -119,6 +134,7 @@ def main():
     bit_type = args.bit_type
     balance = args.balance
     noopt = args.noopt
+    nocs = args.nocs
     pcap_dir = args.pcap_dir
 
     filename_parts = [f"{dataset_name}_N{N}", f"BIT{bit_type}"]
@@ -126,6 +142,8 @@ def main():
         filename_parts.append("balanced")
     if noopt:
         filename_parts.append("noopt")
+    if nocs:
+        filename_parts.append("nocs")
     output_filename = "_".join(filename_parts) + ".npz"
     output_path = os.path.join("features", output_filename)
     os.makedirs("features", exist_ok=True)
@@ -183,7 +201,7 @@ def main():
         features = extract_features(
             packets, N if N > 0 else None, use_ip_layer=True,
             remove_ip_port=True, udp_padding=True, filter_ipv6=True,
-            remove_tcp_options=noopt
+            remove_tcp_options=noopt, remove_checksums=nocs
         )
         X.extend(features)
         y.extend([label] * len(features))
