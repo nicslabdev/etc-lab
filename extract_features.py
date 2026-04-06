@@ -126,6 +126,9 @@ def main():
     parser.add_argument("--balance", action="store_true", help="Whether to balance classes to the smallest size")
     parser.add_argument("--noopt", action="store_true", help="Remove TCP options from packets")
     parser.add_argument("--nocs", action="store_true", help="Remove IP and TCP checksums from packets")
+    parser.add_argument("--background_dir", type=str, default=None,
+                        help="Path to background .pcap/.pcapng files for open-world binary classification. "
+                             "If set, files in pcap_dir are labeled 'foreground' and files in background_dir are labeled 'background'.")
 
     args = parser.parse_args()
 
@@ -136,6 +139,7 @@ def main():
     noopt = args.noopt
     nocs = args.nocs
     pcap_dir = args.pcap_dir
+    background_dir = args.background_dir
 
     filename_parts = [f"{dataset_name}_N{N}", f"BIT{bit_type}"]
     if balance:
@@ -144,54 +148,73 @@ def main():
         filename_parts.append("noopt")
     if nocs:
         filename_parts.append("nocs")
+    if background_dir is not None:
+        filename_parts.append("openworld")
     output_filename = "_".join(filename_parts) + ".npz"
     output_path = os.path.join("features", output_filename)
     os.makedirs("features", exist_ok=True)
 
-    grouping_file = "label_groups.json"
-    if os.path.exists(grouping_file):
-        with open(grouping_file, 'r') as f:
-            grouping_map = json.load(f)
-    else:
-        grouping_map = {}
-
     print(f"Saving output to: {output_path}")
 
-    pcap_files = glob(os.path.join(pcap_dir, '*.pcap')) + glob(os.path.join(pcap_dir, '*.pcapng'))
-    if not pcap_files:
-        raise FileNotFoundError(f"No .pcap or .pcapng files found in: {pcap_dir}")
+    # Open-world mode: binary classification with foreground/background folders
+    if background_dir is not None:
+        foreground_files = glob(os.path.join(pcap_dir, '*.pcap')) + glob(os.path.join(pcap_dir, '*.pcapng'))
+        background_files = glob(os.path.join(background_dir, '*.pcap')) + glob(os.path.join(background_dir, '*.pcapng'))
 
-    keyword_labels = {}
+        if not foreground_files:
+            raise FileNotFoundError(f"No .pcap or .pcapng files found in foreground dir: {pcap_dir}")
+        if not background_files:
+            raise FileNotFoundError(f"No .pcap or .pcapng files found in background dir: {background_dir}")
 
-    # Sort label group keys by length (desc) to prioritize longer, more specific prefixes
-    grouping_keys = sorted(grouping_map.keys(), key=len, reverse=True)
+        pcaps_labels = {}
+        for file in foreground_files:
+            pcaps_labels[file] = "foreground"
+        for file in background_files:
+            pcaps_labels[file] = "background"
 
-    # Assign labels to files based on grouping_map or fallback rule
-    for file in pcap_files:
-        filename = os.path.basename(file)
-        filename_base = os.path.splitext(filename)[0].lower()
+    else:
+        grouping_file = "label_groups.json"
+        if os.path.exists(grouping_file):
+            with open(grouping_file, 'r') as f:
+                grouping_map = json.load(f)
+        else:
+            grouping_map = {}
 
-        # Look for the longest matching prefix from label_groups
-        keyword = None
-        for key in grouping_keys:
-            if filename_base.startswith(key.lower()):
-                keyword = key
-                break
+        pcap_files = glob(os.path.join(pcap_dir, '*.pcap')) + glob(os.path.join(pcap_dir, '*.pcapng'))
+        if not pcap_files:
+            raise FileNotFoundError(f"No .pcap or .pcapng files found in: {pcap_dir}")
 
-        # Default rule if no match found in label_groups
-        if keyword is None:
-            keyword = re.split(r'[_\.]', filename)[0].lower()
+        keyword_labels = {}
 
-        label = grouping_map.get(keyword, keyword.title())
-        keyword_labels[filename] = label  # key is full filename for exact match in next loop
+        # Sort label group keys by length (desc) to prioritize longer, more specific prefixes
+        grouping_keys = sorted(grouping_map.keys(), key=len, reverse=True)
 
-    pcaps_labels = {}
-    for file in pcap_files:
-        filename = os.path.basename(file)
-        label = keyword_labels.get(filename)
-        if label is None:
-            raise ValueError(f"Could not determine label for file: {filename}")
-        pcaps_labels[file] = label
+        # Assign labels to files based on grouping_map or fallback rule
+        for file in pcap_files:
+            filename = os.path.basename(file)
+            filename_base = os.path.splitext(filename)[0].lower()
+
+            # Look for the longest matching prefix from label_groups
+            keyword = None
+            for key in grouping_keys:
+                if filename_base.startswith(key.lower()):
+                    keyword = key
+                    break
+
+            # Default rule if no match found in label_groups
+            if keyword is None:
+                keyword = re.split(r'[_\.]', filename)[0].lower()
+
+            label = grouping_map.get(keyword, keyword.title())
+            keyword_labels[filename] = label  # key is full filename for exact match in next loop
+
+        pcaps_labels = {}
+        for file in pcap_files:
+            filename = os.path.basename(file)
+            label = keyword_labels.get(filename)
+            if label is None:
+                raise ValueError(f"Could not determine label for file: {filename}")
+            pcaps_labels[file] = label
 
     X, y = [], []
 
