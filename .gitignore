@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+
+log/
+logs/
+models/
+models*/
+*.log
+images/
+features/
