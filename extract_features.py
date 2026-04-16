@@ -141,7 +141,7 @@ def main():
     pcap_dir = args.pcap_dir
     background_dir = args.background_dir
 
-    filename_parts = [f"{dataset_name}_N{N}", f"BIT{bit_type}"]
+    filename_parts = [f"{dataset_name}_N{N}", f"BIT{bit_type}", "grouped"]
     if balance:
         filename_parts.append("balanced")
     if noopt:
@@ -216,7 +216,7 @@ def main():
                 raise ValueError(f"Could not determine label for file: {filename}")
             pcaps_labels[file] = label
 
-    X, y = [], []
+    X, y, groups = [], [], []
 
     print("Extracting packets...")
     for pcap_file, label in tqdm(pcaps_labels.items(), desc="Processing pcap files"):
@@ -228,18 +228,22 @@ def main():
         )
         X.extend(features)
         y.extend([label] * len(features))
+        groups.extend([os.path.basename(pcap_file)] * len(features))
 
     X = np.array(X)
     y = np.array(y)
+    groups = np.array(groups)
 
     if balance:
         print("Balancing classes...")
+        print("WARNING: balancing is applied only to X and y. The groups array is NOT re-balanced, so it will no longer be aligned with the final samples.")
+        print("WARNING: if you plan to use group-based train/test splitting later, do not use --balance with this extracted dataset.")
         X, y = balance_classes(X, y)
 
     print(f"Applying BITization: BIT-{bit_type}")
     X = bitization(X, bit_type=bit_type)
 
-    np.savez_compressed(output_path, X=X, y=y)
+    np.savez_compressed(output_path, X=X, y=y, groups=groups)
     print(f"Features saved successfully to '{output_path}'")
 
 if __name__ == "__main__":
